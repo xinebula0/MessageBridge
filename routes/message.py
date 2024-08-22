@@ -2,6 +2,7 @@ from flask import jsonify, g
 from flask.views import MethodView, request
 from sqlalchemy import select
 from components.database import RoutingRule
+from components.mbc import MessageBus, Connector, Message
 
 
 class MessageView(MethodView):
@@ -22,8 +23,22 @@ class MessageView(MethodView):
         stmt = select(RoutingRule).where(RoutingRule.channel.in_(channels),
                                          RoutingRule.sender == sender)
         results = g.db_session.execute(stmt).scalars()
+        g.db_session.commit()
+
+        mbus = MessageBus()
+        message = Message(content, receivers, title=title, timestamp=timestamp)
+        g.db_session.add(message)
+        g.db_session.commit()
+
         for rule in results:
-            rule.send_message(title, content, receivers, timestamp)
+            mbus.add_routing_rule(rule)
+            connector = Connector(name=sender, channel=rule.channel)
+            mbus.register_connector(connector)
+
+        mbus.send_message(message, sender)
+        return jsonify({"message": "Message sent"}), 200
+
+
 
 
 

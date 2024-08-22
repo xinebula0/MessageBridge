@@ -1,0 +1,34 @@
+---
+email:
+  default:
+    host: smtp.gmail.com
+    port: 587
+    username:
+    password:
+  operators:
+    host: smtp.gmail.com
+    port: 587
+    username:
+    password:
+boc:
+  default:
+    host: smtp.gmail.com
+    port: 587
+    username:
+    password:
+  operators:
+    host: smtp.gmail.com
+    port: 587
+    username:
+    password:
+sms:
+    default:
+        host: smtp.gmail.com
+        port: 587
+        username:
+        password:
+    operators:
+        host: smtp.gmail.com
+        port: 587
+        username:
+        password:

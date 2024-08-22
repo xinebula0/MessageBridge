@@ -1,5 +1,3 @@
-import asyncio
-from components.database import RoutingRule
 from components.rules import Message
 
 
