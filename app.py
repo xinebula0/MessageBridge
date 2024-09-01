@@ -1,13 +1,9 @@
-from flask import Flask, g
-from components.database import SessionLocal
+import logging.config
+from messagebus import create_app
 
 
-app = Flask(__name__)
-
-
-@app.before_request
-def create_session():
-    g.db_session = SessionLocal()
+app = create_app()
+logger = logging.getLogger('MBus')
 
 
 @app.teardown_request

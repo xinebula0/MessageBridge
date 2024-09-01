@@ -1,34 +1,36 @@
----
-email:
-  default:
-    host: smtp.gmail.com
-    port: 587
-    username:
-    password:
-  operators:
-    host: smtp.gmail.com
-    port: 587
-    username:
-    password:
-boc:
-  default:
-    host: smtp.gmail.com
-    port: 587
-    username:
-    password:
-  operators:
-    host: smtp.gmail.com
-    port: 587
-    username:
-    password:
-sms:
+SQLALCHEMY_DATABASE_URI: "mysql+mysqlconnector://root:root@localhost:3306/airflow"
+SQLALCHEMY_ECHO: False
+channels:
+  email:
     default:
-        host: smtp.gmail.com
-        port: 587
-        username:
-        password:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:
     operators:
-        host: smtp.gmail.com
-        port: 587
-        username:
-        password:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:
+  boc:
+    default:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:
+    operators:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:
+  sms:
+    default:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:
+    operators:
+      host: smtp.gmail.com
+      port: 587
+      username:
+      password:

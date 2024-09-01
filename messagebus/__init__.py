@@ -1,0 +1,46 @@
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase
+from flask import Flask, g
+import yaml
+import logging
+import logging.config
+from messagebus.mbc import MessageBus
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+# 创建数据库实例
+db = SQLAlchemy(model_class=Base)
+
+
+def create_app():
+    app = Flask(__name__)
+    with open('conf/messagebus.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+        app.config.update(config)
+
+    # 加载 YAML 日志配置
+    with open('logging.yaml', 'r') as f:
+        log_config = yaml.safe_load(f)
+        logging.config.dictConfig(log_config)
+
+    db.init_app(app)
+
+    # 注册蓝图到应用
+    from messagebus.message import message_bp
+    app.register_blueprint(message_bp)
+
+    # 定于全局处理
+    @app.before_request
+    def create_session():
+        g.mbus = MessageBus()
+
+    return app
+
+
+class TransIdFilter(logging.Filter):
+    def filter(self, record):
+        record.uuid = getattr(g, 'uuid', 'N/A')
+        return True

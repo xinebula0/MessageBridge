@@ -1,4 +1,4 @@
-from components.rules import Message
+from messagebus.models import Message
 
 
 class MessageBus:
@@ -18,14 +18,11 @@ class MessageBus:
         """添加一个路由规则"""
         self.routing_rules.append(routing_rule)
 
-    def send_message(self, message, connector_name):
-        """通过指定的连接器发送消息"""
-        connector = self._find_connector_by_name(connector_name)
-        if connector:
+    def send_message(self, message):
+        """将消息通过注册的连接器进行发送"""
+        for connector in self.connectors:
             transformed_message = self._apply_transformations(message, connector)
             connector.send(transformed_message)
-        else:
-            raise ValueError(f"Connector {connector_name} not found")
 
     def receive_message(self, connector_name):
         """从指定的连接器接收消息"""
