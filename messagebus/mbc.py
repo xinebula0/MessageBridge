@@ -1,4 +1,13 @@
-from messagebus.models import Message
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import logging
+from abc import ABC, abstractmethod
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+import requests
+
+logger = logging.getLogger('MBus')
 
 
 class MessageBus:
@@ -56,26 +65,100 @@ class MessageBus:
         return None
 
 
-class Connector:
-    def __init__(self, name, channel):
-        self.name = name
-        self.channel = channel
-        self.transformation_rule = None
-
+class Connector(ABC):
+    @abstractmethod
     def connect(self):
         """连接到消息中间件或平台"""
-        print(f"{self.name} connected using {self.channel}")
+        pass
 
+    @abstractmethod
     def disconnect(self):
         """断开连接"""
         print(f"{self.name} disconnected")
 
+    @abstractmethod
     def send(self, message):
         """发送消息"""
-        print(f"Sending message via {self.name}: {message.content}")
+        pass
 
-    def receive(self):
-        """接收消息"""
-        message = Message(content="Hello from " + self.name)
-        print(f"Received message: {message.content}")
-        return message
+
+class EmailConnector(Connector):
+    def __init__(self, smtp, port, email, password):
+        self.name = "email"
+        self.smtp = smtp
+        self.port = port
+        self.email = email
+        self.password = password
+        self.connector = None
+
+    def connect(self):
+        # 连接到邮件服务器
+        self.connector = smtplib.SMTP(self.smtp, self.port)
+        self.connector.starttls()  # 启用安全连接
+        self.connector.login(self.email, self.password)  # 登录
+        logger.debug(f"Connected to email server {self.smtp}")
+
+    def send(self, message):
+        # 发送邮件
+        msg = MIMEMultipart()
+        msg['From'] = self.email
+        msg['To'] = message.recipient
+        msg['Subject'] = message.title
+        msg.attach(MIMEText(message.content, 'plain'))
+        for sender in message.recipients:
+            if sender == message.sender:
+                self.connector.send_message(msg)
+                logger.debug(f"Email sent to {message.recipient}")
+        self.connector.send_message(msg)
+        logger.debug(f"Email sent to {message.recipient}")
+
+    def disconnect(self):
+        # 断开连接
+        self.connector.quit()
+        logger.debug("Disconnected from email server")
+
+
+class MonkeyTalkConnector(Connector):
+    def __init__(self, url, user, password, cert):
+        self.name = "monkeytalk"
+        self.url = url
+        self.user = user
+        self.password = password
+        self.cert = cert
+        self.ciphertext = None
+        self.token = None
+
+    def connect(self):
+        # 连接到 MonkeyTalk 服务器并获取token
+        with open(self.cert, 'rb', encoding='utf-8') as f:
+            public_key = serialization.load_pem_public_key(f.read())
+            self.ciphertext = public_key.encrypt(self.password.encode('utf-8'),
+                                                 padding.PKCS1v15())
+        response = requests.post(self.url,
+                                 json={'user': self.user, 'password': self.ciphertext},
+                                 headers={'Content-Type': 'application/json'})
+        self.token = response.json().get('token')
+        logger.debug(f"Connected to MonkeyTalk server {self.url}")
+
+    def send(self, message):
+        # 发送消息到 MonkeyTalk
+        response = requests.post(self.url,
+                                 json={'token': self.token, 'message': message.content},
+                                 headers={'Content-Type': 'application/json'})
+        response.raise_for_status()
+        logger.debug(f"Message sent to MonkeyTalk")
+
+    def close(self):
+        # 关闭连接
+        self.token = None
+        logger.debug("Disconnected from MonkeyTalk server")
+
+class ConnectorFactory:
+    @staticmethod
+    def get_connector(conn, *args, **kwargs):
+        if conn == "email":
+            return EmailConnector(*args, **kwargs)
+        if conn == "monkeytalk":
+            return MonkeyTalkConnector(*args, **kwargs)
+        else:
+            raise ValueError(f"Unknown database type: {conn}")

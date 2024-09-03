@@ -2,8 +2,11 @@ from flask import jsonify, g
 from flask.views import MethodView, request
 from sqlalchemy import select
 from messagebus.models import RoutingRule, MessageSchema
-from messagebus.mbc import MessageBus, Connector
+from messagebus.mbc import MessageBus, ConnectorFactory
 from messagebus import db
+import logging
+
+logger = logging.getLogger('MBus')
 
 
 class MessageView(MethodView):
@@ -22,15 +25,22 @@ class MessageView(MethodView):
 
         results = db.session.execute(stmt).scalars()
         db.session.commit()
-        if len(results) != len(message.channels):
-            return jsonify({"error": "Invalid channel found"}), 400
+        channels = list()
+        for result in results:
+            if result.channel not in channels:
+                channels.append(result.channel)
+                conn = ConnectorFactory.get_connector(result.channel)
 
+            message.recipients.append(result.recipient)
+        if len(channels) != len(message.channels):
+            logger.error(f"Invalid channel found: {message.channels}")
+            return jsonify({"error": "Invalid channel found"}), 400
         db.session.add(message)
         db.session.commit()
 
         for rule in results:
             g.mbus.add_routing_rule(rule)
-            connector = Connector(name=message.sender, channel=rule.channel)
+            connector = ConnectorFactory(name=message.sender, channel=rule.channel)
             g.mbus.register_connector(connector)
 
         g.mbus.send_message(message)

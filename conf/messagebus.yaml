@@ -2,35 +2,8 @@ SQLALCHEMY_DATABASE_URI: "mysql+mysqlconnector://root:root@localhost:3306/airflo
 SQLALCHEMY_ECHO: False
 channels:
   email:
-    default:
-      host: smtp.gmail.com
-      port: 587
-      username:
-      password:
     operators:
-      host: smtp.gmail.com
+      smtp: smtp-mail.outlook.com
       port: 587
-      username:
-      password:
-  boc:
-    default:
-      host: smtp.gmail.com
-      port: 587
-      username:
-      password:
-    operators:
-      host: smtp.gmail.com
-      port: 587
-      username:
-      password:
-  sms:
-    default:
-      host: smtp.gmail.com
-      port: 587
-      username:
-      password:
-    operators:
-      host: smtp.gmail.com
-      port: 587
-      username:
+      sender: xcloudystone@outlook.com
       password:

@@ -11,21 +11,32 @@ class RoutingRule(db.Model):
 
     channel: Mapped[str] = mapped_column(String, comment="消息内容类型")
     sender: Mapped[str] = mapped_column(String, comment="消息发送者")
-    receiver: Mapped[str] = mapped_column(String, comment="消息接收者")
+    recipient: Mapped[str] = mapped_column(String, comment="消息接收者")
+    created_at: Mapped[datetime] = mapped_column(DateTime,
+                                                 default=datetime.now(timezone.utc),
+                                                 comment="创建时间")
 
     __table_args__ = (
-        PrimaryKeyConstraint('channel', 'sender'),
+        PrimaryKeyConstraint('channel', 'sender', 'recipient'),
     )
 
 
 class RoutingRuleSchema(Schema):
-    channel = fields.String(required=True)
     sender = fields.String(required=True)
-    receiver = fields.String(required=True)
+    channel = fields.String(required=True)
+    recipient = fields.String(required=True)
+    created_at = fields.DateTime(format="%Y-%m-%d %H:%M:%S")
 
     @post_load
     def make_routing_rule(self, data, **kwargs):
         return RoutingRule(**data)
+
+    @pre_load
+    def check_crate_at(self, data, **kwargs):
+        if not data.get("created_at"):
+            data["created_at"] = datetime.now(timezone.utc)
+
+        return data
 
 
 class Message(db.Mode):
@@ -33,9 +44,10 @@ class Message(db.Mode):
 
     id: Mapped[int] = mapped_column(Integer, autoincrement=True, primary_key=True, comment="消息ID")
     content: Mapped[str] = mapped_column(Text, comment="消息内容")
-    receivers: Mapped[list] = mapped_column(JSON, comment="接收者")
+    recipients: Mapped[list] = mapped_column(JSON, comment="接收者")
     title: Mapped[str] = mapped_column(String, nullable=False, comment="消息标题")
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc),                                         comment="时间戳")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc),comment="创建时间")
+    sent_at: Mapped[datetime] = mapped_column(nullable=True, comment="发送时间")
     sender: Mapped[str] = mapped_column(String, comment="发送者")
     channels: Mapped[list] = mapped_column(JSON, comment="消息通道")
     status: Mapped[str] = mapped_column(String(32), comment="消息状态")
@@ -45,9 +57,10 @@ class Message(db.Mode):
 class MessageSchema(Schema):
     id = fields.Integer(dump_only=True)
     content = fields.String(required=True)
-    receivers = fields.List(fields.Str(), required=True)
+    recipients = fields.List(fields.Str(), required=True)
     title = fields.String(required=True)
-    timestamp = fields.DateTime(format="%Y-%m-%d %H:%M:%S")
+    created_at = fields.DateTime(format="%Y-%m-%d %H:%M:%S")
+    sent_at = fields.DateTime(allow_none=True, format="%Y-%m-%d %H:%M:%S")
     sender = fields.String()
     channels = fields.List(fields.Str(), required=True)
     status = fields.String()
@@ -64,3 +77,8 @@ class MessageSchema(Schema):
 
         if not data.get("uuid"):
             data["uuid"] = str(uuid.uuid4())
+
+        if not data.get("recipients"):
+            data["recipients"] = list()
+
+        return data
