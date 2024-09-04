@@ -7,3 +7,10 @@ channels:
       port: 587
       sender: xcloudystone@outlook.com
       password:
+  monkeytalk:
+    default:
+      baseurl: http://localhost:5000
+      torkurl:
+      pem: /path/to/pem
+      user:
+      password:

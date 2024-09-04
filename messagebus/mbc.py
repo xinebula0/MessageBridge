@@ -5,7 +5,8 @@ import logging
 from abc import ABC, abstractmethod
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-import requests
+from requests import Session
+import base64
 
 logger = logging.getLogger('MBus')
 
@@ -119,39 +120,75 @@ class EmailConnector(Connector):
 
 
 class MonkeyTalkConnector(Connector):
-    def __init__(self, url, user, password, cert):
+    """
+    api/sys/users/my
+    oa/getFollowers/{id}
+    sysUserLogin
+    /oa/message/send
+    """
+    def __init__(self, baseurl, user, password, cert):
         self.name = "monkeytalk"
-        self.url = url
+        self.baseurl = baseurl
         self.user = user
         self.password = password
         self.cert = cert
-        self.ciphertext = None
         self.token = None
+        self.session = Session()
+        self.session.headers.update({"Content-Type": "application/json"})
+        with open(self.cert, 'rb') as f:
+            public_key = serialization.load_pem_public_key(f.read())
+        ciphertext = base64.b64decode(public_key.encrypt(bytes(self.password.encode("utf-8")),
+                                                         padding.PKCS1v15())
+                                      ).decode("utf-8")
+        self.ciphertext = ciphertext
 
     def connect(self):
         # 连接到 MonkeyTalk 服务器并获取token
-        with open(self.cert, 'rb', encoding='utf-8') as f:
-            public_key = serialization.load_pem_public_key(f.read())
-            self.ciphertext = public_key.encrypt(self.password.encode('utf-8'),
-                                                 padding.PKCS1v15())
-        response = requests.post(self.url,
-                                 json={'user': self.user, 'password': self.ciphertext},
-                                 headers={'Content-Type': 'application/json'})
-        self.token = response.json().get('token')
-        logger.debug(f"Connected to MonkeyTalk server {self.url}")
+        self.refresh_token()
+        logger.debug(f"Connected to MonkeyTalk server {self.baseurl}")
 
     def send(self, message):
         # 发送消息到 MonkeyTalk
-        response = requests.post(self.url,
-                                 json={'token': self.token, 'message': message.content},
-                                 headers={'Content-Type': 'application/json'})
+        url = f"{self.baseurl}/oa/message/send"
+        recipients = self.recipient_filter(message.recipients)
+        response = self.session.post(url, json={'content': message.content,
+                                                'userLists': recipients})
         response.raise_for_status()
+
         logger.debug(f"Message sent to MonkeyTalk")
 
-    def close(self):
+    def recipient_filter(self, users):
+        url = f"{self.baseurl}/oa/getFollowers/{self.user}"
+        response = self.session.get(url)
+        response.raise_for_status()
+        followers = [follower.username for follower in response.json().get('data')]
+
+        diff = list(set(users) - set(followers))
+        if diff:
+            logger.error(f"Recipient {diff} not found in MonkeyTalk.")
+            recipients = list(set(users) - set(diff))
+        else:
+            recipients = users.copy()
+
+        return recipients
+
+    def refresh_token(self):
+        url = f"{self.baseurl}/sysUserLogin"
+        response = self.session.post(url, json={'user': self.user, 'password': self.ciphertext},
+                                     headers={'Client-Version': '1.4.4'})
+        if response.status_code == 200:
+            self.token = response.json().get('token')
+            self.session.headers.update({"Authorization": self.token})
+        else:
+            logger.error("ERROR! Get token failed.")
+            response.raise_for_status()
+
+    def disconnect(self):
         # 关闭连接
         self.token = None
+        self.session.close()
         logger.debug("Disconnected from MonkeyTalk server")
+
 
 class ConnectorFactory:
     @staticmethod
