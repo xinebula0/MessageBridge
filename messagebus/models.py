@@ -1,9 +1,11 @@
-from sqlalchemy import String, Integer, Text, DateTime, JSON, PrimaryKeyConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (String, Integer, Text, DateTime, JSON,
+                        PrimaryKeyConstraint, Index, ForeignKey, Boolean)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from marshmallow import Schema, fields, post_load, pre_load
 from datetime import datetime, timezone
 import uuid
 from messagebus import db
+from typing import Optional
 
 
 class RoutingRule(db.Model):
@@ -39,7 +41,7 @@ class RoutingRuleSchema(Schema):
         return data
 
 
-class Message(db.Mode):
+class Message(db.Model):
     __tablename__ = 'message'  # 消息表
 
     id: Mapped[int] = mapped_column(Integer, autoincrement=True, primary_key=True, comment="消息ID")
@@ -82,3 +84,60 @@ class MessageSchema(Schema):
             data["recipients"] = list()
 
         return data
+
+
+class Recipient(db.Model):
+    __tablename__ = "recipient"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="个人姓名或群名称")
+    is_group: Mapped[bool] = mapped_column(Boolean, nullable=False, comment="群标志")
+    employee_id: Mapped[Optional[str]] = mapped_column(String(30), comment="员工号，群可为空")
+    monkeytalk: Mapped[Optional[str]] = mapped_column(String(30), comment="Monkey Talk的用户名")
+    email: Mapped[Optional[str]] = mapped_column(String(254), comment="邮箱地址")
+    bocsms: Mapped[Optional[str]] = mapped_column(String(30), comment="行信")
+    # 关系设置
+    members: Mapped[list["RecipientGroup"]] = relationship(
+        "RecipientGroup",
+        foreign_keys="RecipientGroup.group",
+        cascade="all, delete-orphan"
+    )
+
+
+class RecipientSchema(Schema):
+    id = fields.Integer(dump_only=True)
+    name = fields.String(allow_none=False)
+    is_group = fields.Boolean(allow_none=False)
+    employee_id = fields.String(allow_none=True)
+    monkeytalk = fields.String(allow_none=True)
+    email = fields.String(allow_none=True)
+    bocsms = fields.String(allow_none=True)
+
+    @post_load
+    def make_recipient(self, data, **kwargs):
+        return Recipient(**data)
+
+
+class RecipientGroup(db.Model):
+    __tablename__ = "recipient_group"
+
+    group: Mapped[int] = mapped_column(ForeignKey("recipient.id", ondelete="CASCADE"),
+                                       nullable=False)
+    recipient: Mapped[int] = mapped_column(ForeignKey("recipient.id", ondelete="CASCADE"),
+                                           nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("group", "recipient"),
+        Index("ix_group", "group")
+    )
+
+
+class RecipientGroupSchema(Schema):
+    group = fields.Int(required=True, allow_none=False)
+    recipient = fields.Int(required=True, allow_none=False)
+    active = fields.Bool(require=True)
+
+    @post_load
+    def make_group(self, data, **kwargs):
+        return RecipientGroup(**data)

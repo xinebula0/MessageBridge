@@ -2,10 +2,13 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from flask import Flask, g
 import yaml
-import logging
 import logging.config
 from messagebus.mbc import MessageBus
+from cryptography.fernet import Fernet
+import os
+import logging
 
+logger = logging.getLogger('MBus')
 
 class Base(DeclarativeBase):
     pass
@@ -44,3 +47,13 @@ class TransIdFilter(logging.Filter):
     def filter(self, record):
         record.uuid = getattr(g, 'uuid', 'N/A')
         return True
+
+
+def decrypt(password):
+    if os.getenv("MASTER_KEY"):
+        MASTER_KEY = bytes(os.getenv("MASTER_KEY").encode("utf-8"))
+    else:
+        logger.error("Error! MASTER_KEY not found, now using default key")
+        MASTER_KEY = b"ThisIsTheMasterKey"
+    cipher_suite = Fernet(MASTER_KEY)
+    return cipher_suite.decrypt(password).decode("utf-8")
