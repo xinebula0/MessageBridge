@@ -57,3 +57,5 @@ def decrypt(password):
         MASTER_KEY = b"ThisIsTheMasterKey"
     cipher_suite = Fernet(MASTER_KEY)
     return cipher_suite.decrypt(password).decode("utf-8")
+
+

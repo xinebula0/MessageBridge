@@ -1,5 +1,6 @@
-from sqlalchemy import (String, Integer, Text, DateTime, JSON,
-                        PrimaryKeyConstraint, Index, ForeignKey, Boolean)
+from sqlalchemy import (String, Integer, Text, DateTime,
+                        UniqueConstraint, PrimaryKeyConstraint,
+                        Index, ForeignKey, Boolean)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from marshmallow import Schema, fields, post_load, pre_load
 from datetime import datetime, timezone
@@ -8,30 +9,39 @@ from messagebus import db
 from typing import Optional
 
 
-class RoutingRule(db.Model):
+class Subscription(db.Model):
     __tablename__ = 'routing_rule'  # 定义表名称
 
-    channel: Mapped[str] = mapped_column(String, comment="消息内容类型")
-    sender: Mapped[str] = mapped_column(String, comment="消息发送者")
-    recipient: Mapped[str] = mapped_column(String, comment="消息接收者")
+    id: Mapped[int] = mapped_column(Integer, autoincrement=True, primary_key=True, comment="订阅序号")
+    sender: Mapped[str] = mapped_column(String(50), comment="消息发送者")
+    recipient: Mapped[int] = mapped_column(ForeignKey("recipient.id"),
+                                           nullable=False, comment="消息接收者")
+    category: Mapped[str] = mapped_column(String(150), comment="消息类别")
+    channel: Mapped[str] = mapped_column(String(50), comment="消息内容渠道")
+    cronexpress: Mapped[str] = mapped_column(String(255), default="* * * * *", comment="定时发送表达式")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否激活")
     created_at: Mapped[datetime] = mapped_column(DateTime,
                                                  default=datetime.now(timezone.utc),
                                                  comment="创建时间")
 
     __table_args__ = (
-        PrimaryKeyConstraint('channel', 'sender', 'recipient'),
+        UniqueConstraint('sender', 'recipient', 'category', 'channel'),
     )
 
 
-class RoutingRuleSchema(Schema):
-    sender = fields.String(required=True)
-    channel = fields.String(required=True)
-    recipient = fields.String(required=True)
+class SubscriptionSchema(Schema):
+    id = fields.Integer(dump_only=True)
+    sender = fields.String(allow_none=False, required=True)
+    recipient = fields.Integer(allow_none=False, required=True)
+    category = fields.String(allow_none=False, required=True)
+    channel = fields.String(allow_none=False, required=True)
+    cronexpress = fields.String(allow_none=True, required=True)
+    is_active = fields.Boolean(allow_none=True, required=True)
     created_at = fields.DateTime(format="%Y-%m-%d %H:%M:%S")
 
     @post_load
     def make_routing_rule(self, data, **kwargs):
-        return RoutingRule(**data)
+        return Subscription(**data)
 
     @pre_load
     def check_crate_at(self, data, **kwargs):
@@ -46,27 +56,27 @@ class Message(db.Model):
 
     id: Mapped[int] = mapped_column(Integer, autoincrement=True, primary_key=True, comment="消息ID")
     content: Mapped[str] = mapped_column(Text, comment="消息内容")
-    recipients: Mapped[list] = mapped_column(JSON, comment="接收者")
-    title: Mapped[str] = mapped_column(String, nullable=False, comment="消息标题")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc),comment="创建时间")
+    title: Mapped[str] = mapped_column(String(150), nullable=False, comment="消息标题")
+    category: Mapped[str] = mapped_column(String(150), nullable=False, comment="消息类别")
+    created_at: Mapped[datetime] = mapped_column(DateTime,
+                                                 default=datetime.now(timezone.utc),
+                                                 comment="创建时间")
     sent_at: Mapped[datetime] = mapped_column(nullable=True, comment="发送时间")
-    sender: Mapped[str] = mapped_column(String, comment="发送者")
-    channels: Mapped[list] = mapped_column(JSON, comment="消息通道")
-    status: Mapped[str] = mapped_column(String(32), comment="消息状态")
-    uuid: Mapped[str] = mapped_column(String(36), comment="消息唯一uuid标识")
+    sender: Mapped[str] = mapped_column(String(50), nullable=False, comment="发送者")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, comment="消息状态")
+    uuid: Mapped[str] = mapped_column(String(36), nullable=False, comment="消息唯一uuid标识")
 
 
 class MessageSchema(Schema):
     id = fields.Integer(dump_only=True)
     content = fields.String(required=True)
-    recipients = fields.List(fields.Str(), required=True)
     title = fields.String(required=True)
-    created_at = fields.DateTime(format="%Y-%m-%d %H:%M:%S")
+    category = fields.String(allow_none=False, required=True)
+    created_at = fields.DateTime(required=False, format="%Y-%m-%d %H:%M:%S")
     sent_at = fields.DateTime(allow_none=True, format="%Y-%m-%d %H:%M:%S")
-    sender = fields.String()
-    channels = fields.List(fields.Str(), required=True)
-    status = fields.String()
-    uuid = fields.String()
+    sender = fields.String(allow_none=False)
+    status = fields.String(required=False)
+    uuid = fields.String(required=False)
 
     @post_load
     def make_message(self, data, **kwargs):
@@ -92,10 +102,13 @@ class Recipient(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="个人姓名或群名称")
     is_group: Mapped[bool] = mapped_column(Boolean, nullable=False, comment="群标志")
-    employee_id: Mapped[Optional[str]] = mapped_column(String(30), comment="员工号，群可为空")
-    monkeytalk: Mapped[Optional[str]] = mapped_column(String(30), comment="Monkey Talk的用户名")
+    employee_id: Mapped[Optional[str]] = mapped_column(String(50), comment="员工号，群可为空")
+    monkeytalk: Mapped[Optional[str]] = mapped_column(String(50), comment="Monkey Talk的用户名")
     email: Mapped[Optional[str]] = mapped_column(String(254), comment="邮箱地址")
-    bocsms: Mapped[Optional[str]] = mapped_column(String(30), comment="行信")
+    bocsms: Mapped[Optional[str]] = mapped_column(String(50), comment="行信")
+    last_updated: Mapped[datetime] = mapped_column(DateTime,
+                                                   default=datetime.now(timezone.utc),
+                                                   comment="最后更新时间")
     # 关系设置
     members: Mapped[list["RecipientGroup"]] = relationship(
         "RecipientGroup",
@@ -112,6 +125,7 @@ class RecipientSchema(Schema):
     monkeytalk = fields.String(allow_none=True)
     email = fields.String(allow_none=True)
     bocsms = fields.String(allow_none=True)
+    last_updated = fields.DateTime(allow_none=True, format="%Y-%m-%d %H:%M:%S")
 
     @post_load
     def make_recipient(self, data, **kwargs):
@@ -141,3 +155,30 @@ class RecipientGroupSchema(Schema):
     @post_load
     def make_group(self, data, **kwargs):
         return RecipientGroup(**data)
+
+
+class DeliveryLog(db.Model):
+    __tablename__ = "delivery_log"
+
+    uuid: Mapped[str] = mapped_column(String(36), comment="消息唯一uuid标识")
+    task_id: Mapped[id] = mapped_column(String(36), comment="任务ID")
+    recipient: Mapped[str] = mapped_column(String(100), nullable=False, comment="接收者name字段")
+    employee_id: Mapped[str] = mapped_column(String(50), comment="员工号")
+    channel: Mapped[str] = mapped_column(String(50), comment="发送渠道")
+    status: Mapped[str] = mapped_column(String(32), comment="发送状态")
+    updated_at: Mapped[datetime] = mapped_column(DateTime,
+                                                 default=datetime.now(timezone.utc),
+                                                 comment="更新时间")
+
+
+class DeliveryLogSchema(Schema):
+    uuid = fields.String(required=True, allow_none=False)
+    task_id = fields.String(required=True, allow_none=False)
+    recipient = fields.String(required=True, allow_none=False)
+    employee_id = fields.String(allow_none=True)
+    status = fields.String(required=True, allow_none=False)
+    updated_at = fields.DateTime(allow_none=True, format="%Y-%m-%d %H:%M:%S")
+
+    @post_load
+    def make_deliverylog(self, data, **kwargs):
+        return DeliveryLog(**data)

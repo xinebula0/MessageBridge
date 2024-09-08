@@ -1,16 +1,22 @@
 SQLALCHEMY_DATABASE_URI: "mysql+mysqlconnector://root:root@localhost:3306/airflow"
 SQLALCHEMY_ECHO: False
 channels:
+  inuse: ["email", "monkeytalk"]
   email:
-    operators:
+    default:
       smtp: smtp-mail.outlook.com
       port: 587
-      sender: xcloudystone@outlook.com
+      email: someone@outlook.com
       password:
   monkeytalk:
     default:
       baseurl: http://localhost:5000
-      torkurl:
-      pem: /path/to/pem
+      cert: /path/to/pem
       user:
       password:
+keycloak:
+  host: https://keycloak:8443/
+  realm: master
+  client_id: client
+  client_secret: secret
+  cert: /path/to/pem

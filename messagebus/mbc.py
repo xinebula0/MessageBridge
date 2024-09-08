@@ -25,33 +25,13 @@ class MessageBus:
         """注册一个新的连接器"""
         self.connectors.append(connector)
 
-    def add_routing_rule(self, routing_rule):
-        """添加一个路由规则"""
-        self.routing_rules.append(routing_rule)
-
-    def send_message(self, message):
+    def send(self, conn, message, recipients):
         """将消息通过注册的连接器进行发送"""
-        for connector in self.connectors:
-            transformed_message = self._apply_transformations(message, connector)
-            connector.send(transformed_message)
-
-    def receive_message(self, connector_name):
-        """从指定的连接器接收消息"""
-        connector = self._find_connector_by_name(connector_name)
-        if connector:
-            message = connector.receive()
-            self.route_message(message)
-        else:
-            raise ValueError(f"Connector {connector_name} not found")
-
-    def route_message(self, message):
-        """根据路由规则将消息发送到目标连接器"""
-        for rule in self.routing_rules:
-            if rule.is_match(message):
-                destination_connector = self._find_connector_by_name(rule.destination_connector)
-                if destination_connector:
-                    transformed_message = self._apply_transformations(message, destination_connector)
-                    destination_connector.send(transformed_message)
+        connector = self._find_connector_by_name(conn)
+        if not connector:
+            logger.error(f"Connector {conn} not found.")
+            return
+        connector.send(message, recipients)
 
     def _apply_transformations(self, message, connector):
         """应用消息转换规则（如有必要）"""
@@ -79,7 +59,7 @@ class Connector(ABC):
         print(f"{self.name} disconnected")
 
     @abstractmethod
-    def send(self, message):
+    def send(self, message, recipient):
         """发送消息"""
         pass
 
@@ -100,7 +80,7 @@ class EmailConnector(Connector):
         self.connector.login(self.email, self.password)  # 登录
         logger.debug(f"Connected to email server {self.smtp}")
 
-    def send(self, message):
+    def send(self, message, recipients):
         # 发送邮件
         msg = MIMEMultipart()
         msg['From'] = self.email
@@ -148,15 +128,14 @@ class MonkeyTalkConnector(Connector):
         self.refresh_token()
         logger.debug(f"Connected to MonkeyTalk server {self.baseurl}")
 
-    def send(self, message):
+    def send(self, message, recipients):
         # 发送消息到 MonkeyTalk
         url = f"{self.baseurl}/oa/message/send"
-        recipients = self.recipient_filter(message.recipients)
         response = self.session.post(url, json={'content': message.content,
                                                 'userLists': recipients})
         response.raise_for_status()
 
-        logger.debug(f"Message sent to MonkeyTalk")
+        logger.debug(f"Message {message.uuid} has been sent to {recipients}")
 
     def recipient_filter(self, users):
         url = f"{self.baseurl}/oa/getFollowers/{self.user}"
@@ -195,8 +174,14 @@ class ConnectorFactory:
     @staticmethod
     def get_connector(conn, *args, **kwargs):
         if conn == "email":
-            return EmailConnector(*args, **kwargs)
+            return EmailConnector(kwargs["smtp"],
+                                  kwargs["port"],
+                                  kwargs["email"],
+                                  kwargs["password"])
         if conn == "monkeytalk":
-            return MonkeyTalkConnector(*args, **kwargs)
+            return MonkeyTalkConnector(kwargs["baseurl"],
+                                       kwargs["user"],
+                                       kwargs["password"],
+                                       kwargs["cert"])
         else:
             raise ValueError(f"Unknown database type: {conn}")
