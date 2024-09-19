@@ -1,22 +1,31 @@
-SQLALCHEMY_DATABASE_URI: "mysql+mysqlconnector://root:root@localhost:3306/airflow"
+INSTANCE:  APOPS
+SQLALCHEMY_DATABASE_URI: "mysql+mysqlconnector://root:root@localhost:3306/msbridge"
 SQLALCHEMY_ECHO: False
+inuse: ["email", "monkeytalk", "bocwechat"]
 channels:
-  inuse: ["email", "monkeytalk"]
   email:
     default:
       smtp: smtp-mail.outlook.com
       port: 587
-      email: someone@outlook.com
+      email: sample@outlook.com
       password:
   monkeytalk:
     default:
-      baseurl: http://localhost:5000
-      cert: /path/to/pem
-      user:
-      password:
+      baseurl: http://localhost:8086
+      cert: ca.pem
+      user: user
+      password: password
+  bocwechat:
+    default:
+      baseurl: http://localhost
+      tokenurl: https://localhost/token
+      cert: ""
+      client_id: client
+      client_secret: secret
 keycloak:
-  host: https://keycloak:8443/
-  realm: master
+  host: https://localhost:8443
+  realm: Master
   client_id: client
   client_secret: secret
-  cert: /path/to/pem
+  cert: ca.pem
+  pagesize: 200

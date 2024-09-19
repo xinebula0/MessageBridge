@@ -1,13 +1,20 @@
+import base64
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import logging
+from pathlib import Path
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from requests import Session
+from sqlalchemy import select
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from requests import Session
-import base64
-from messagebus import decrypt
+from flask import render_template, current_app, abort
+from messagebus import db
+from messagebus.models import Token
+
+# from messagebus import decrypt
 
 logger = logging.getLogger('MBus')
 
@@ -17,6 +24,7 @@ class MessageBus:
         管理所有连接器并处理消息的路由和传输。它可以注册连接器、接收消息、发送消息以及根据路由规则将消息路由到适当的目标。
         允许同步和异步方式调用
     """
+
     def __init__(self):
         self.connectors = []
         self.routing_rules = []
@@ -31,7 +39,8 @@ class MessageBus:
         if not connector:
             logger.error(f"Connector {conn} not found.")
             return
-        connector.send(message, recipients)
+        with connector as conn:
+            conn.send(message, recipients)
 
     def _apply_transformations(self, message, connector):
         """应用消息转换规则（如有必要）"""
@@ -56,12 +65,19 @@ class Connector(ABC):
     @abstractmethod
     def disconnect(self):
         """断开连接"""
-        print(f"{self.name} disconnected")
+        print(f"{self} disconnected")
 
     @abstractmethod
-    def send(self, message, recipient):
+    def send(self, message, recipients):
         """发送消息"""
         pass
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.disconnect()
 
 
 class EmailConnector(Connector):
@@ -82,6 +98,7 @@ class EmailConnector(Connector):
 
     def send(self, message, recipients):
         # 发送邮件
+        self.connector.connect()
         msg = MIMEMultipart()
         msg['From'] = self.email
         msg['To'] = message.recipient
@@ -93,6 +110,7 @@ class EmailConnector(Connector):
                 logger.debug(f"Email sent to {message.recipient}")
         self.connector.send_message(msg)
         logger.debug(f"Email sent to {message.recipient}")
+        self.connector.disconnect()
 
     def disconnect(self):
         # 断开连接
@@ -107,6 +125,7 @@ class MonkeyTalkConnector(Connector):
     sysUserLogin
     /oa/message/send
     """
+
     def __init__(self, baseurl, user, password, cert):
         self.name = "monkeytalk"
         self.baseurl = baseurl
@@ -118,7 +137,7 @@ class MonkeyTalkConnector(Connector):
         self.session.headers.update({"Content-Type": "application/json"})
         with open(self.cert, 'rb') as f:
             public_key = serialization.load_pem_public_key(f.read())
-        ciphertext = base64.b64decode(public_key.encrypt(bytes(self.password.encode("utf-8")),
+        ciphertext = base64.b64encode(public_key.encrypt(bytes(self.password.encode("utf-8")),
                                                          padding.PKCS1v15())
                                       ).decode("utf-8")
         self.ciphertext = ciphertext
@@ -126,48 +145,136 @@ class MonkeyTalkConnector(Connector):
     def connect(self):
         # 连接到 MonkeyTalk 服务器并获取token
         self.refresh_token()
-        logger.debug(f"Connected to MonkeyTalk server {self.baseurl}")
+        logger.debug(f"Connected to MonkeyTalk server {self.baseurl}.")
 
     def send(self, message, recipients):
         # 发送消息到 MonkeyTalk
         url = f"{self.baseurl}/oa/message/send"
-        response = self.session.post(url, json={'content': message.content,
-                                                'userLists': recipients})
+        # receivers = self.recipient_filter(recipients)
+        receivers = recipients
+        if Path(f"{current_app.template_folder}/{message.category}.j2").exists():
+            content = render_template(f"{message.category}.j2", message=message)
+        else:
+            content = message.content
+        response = self.session.post(url, json={'content': content,
+                                                'userLists': receivers})
         response.raise_for_status()
-
-        logger.debug(f"Message {message.uuid} has been sent to {recipients}")
+        logger.info(response.json())
+        if response.json().get('code') == 200:
+            logger.info(f"Message has been sent to {receivers}")
+        else:
+            logger.error(f"Server has failed for [{response.json().get("msg")}]")
+            abort(response.json().get("code"), response.json().get("msg"))
 
     def recipient_filter(self, users):
-        url = f"{self.baseurl}/oa/getFollowers/{self.user}"
+        url = f"{self.baseurl}/oa/getFollowers/16288"
         response = self.session.get(url)
         response.raise_for_status()
-        followers = [follower.username for follower in response.json().get('data')]
+        logger.debug(response.json())
+        followers = [follower["username"] for follower in response.json().get('data')]
 
         diff = list(set(users) - set(followers))
         if diff:
             logger.error(f"Recipient {diff} not found in MonkeyTalk.")
             recipients = list(set(users) - set(diff))
         else:
-            recipients = users.copy()
+            recipients = users
 
         return recipients
 
     def refresh_token(self):
         url = f"{self.baseurl}/sysUserLogin"
-        response = self.session.post(url, json={'user': self.user, 'password': self.ciphertext},
+        response = self.session.post(url, json={'username': self.user, 'password': self.ciphertext},
                                      headers={'Client-Version': '1.4.4'})
-        if response.status_code == 200:
+        response.raise_for_status()
+        if response.json().get("code") == 200:
             self.token = response.json().get('token')
             self.session.headers.update({"Authorization": self.token})
         else:
-            logger.error("ERROR! Get token failed.")
-            response.raise_for_status()
+            logger.error(f"ERROR! Get token failed. [{response.json().get("msg")}]")
+            abort(response.json().get("code"), response.json().get("msg"))
 
     def disconnect(self):
         # 关闭连接
         self.token = None
         self.session.close()
         logger.debug("Disconnected from MonkeyTalk server")
+
+
+class BocWeChat(Connector):
+
+    def __init__(self, baseurl, tokenurl, cert, client_id, client_secret):
+        self.baseurl = baseurl
+        self.cert = cert
+        self.tokenurl = tokenurl
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.name = "bocwechat"
+        self.session = Session()
+
+    def connect(self):
+        # 连接到服务器并获取token
+        self.refresh_token()
+        logger.debug(f"Connected to BocWeChat server {self.baseurl}.")
+
+    def send(self, message, recipients):
+        """发送消息
+
+        Args:
+            message (Message): 消息对象
+            recipients (list): 接收者列表
+        """
+        # receivers = self.recipient_filter(recipients)
+        receivers = recipients
+        if Path(f"{current_app.template_folder}/{message.category}.j2").exists():
+            content = render_template(f"{message.category}.j2", message=message)
+        else:
+            content = message.content
+        targets = [{"targetType": "individual", "targetId": tid} for tid in receivers]
+        response = self.session.post(self.baseurl, json={'content': content,
+                                                         'type': "text",
+                                                         'targets': targets})
+        response.raise_for_status()
+        logger.info(response.json())
+        if response.json().get('status') == 200:
+            logger.info(f"Message has been sent to {receivers}")
+        else:
+            logger.error(f"Server has failed for [{response.json().get("data")}]")
+            abort(response.json().get("status"), response.json().get("data"))
+
+    def refresh_token(self):
+        stmt = select(Token).where(Token.channel == self.name)
+        row = db.session.execute(stmt).scalar()
+        if row and row.expired_at > datetime.now():
+            access_token = row.access_token
+            logger.debug("Token no need to update.")
+        else:
+            params = {"client_id": self.client_id,
+                      "client_secret": self.client_secret,
+                      "grant_type": "client_credentials"}
+            print(self.cert)
+            print(self.cert is True)
+            response = self.session.post(self.tokenurl, params=params, verify=self.cert if self.cert else False)
+            response.raise_for_status()
+            resp = response.json()
+            logger.debug(resp)
+
+            expired_at = datetime.now() + timedelta(seconds=resp.get("expires_in"))
+            token_type = resp.get("token_type")
+            access_token = resp.get("access_token")
+            token = Token(channel=self.name,
+                          access_token=access_token,
+                          token_type=token_type,
+                          refresh_token=None,
+                          expired_at=expired_at)
+            db.session.merge(token)
+            logger.debug("Token has been updated.")
+        self.session.headers.update({"Authorization": f"Bearer {access_token}"})
+
+    def disconnect(self):
+        self.token = None
+        self.session.close()
+        logger.debug("Disconnected from BocWeChat server")
 
 
 class ConnectorFactory:
@@ -178,10 +285,17 @@ class ConnectorFactory:
                                   kwargs["port"],
                                   kwargs["email"],
                                   kwargs["password"])
-        if conn == "monkeytalk":
+        elif conn == "monkeytalk":
             return MonkeyTalkConnector(kwargs["baseurl"],
                                        kwargs["user"],
                                        kwargs["password"],
                                        kwargs["cert"])
+        elif conn == "bocwechat":
+            print(kwargs)
+            return BocWeChat(kwargs["baseurl"],
+                             kwargs["tokenurl"],
+                             kwargs["cert"],
+                             kwargs["client_id"],
+                             kwargs["client_secret"])
         else:
-            raise ValueError(f"Unknown database type: {conn}")
+            raise ValueError(f"Unknown connection type: {conn}")

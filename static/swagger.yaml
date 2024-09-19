@@ -1,0 +1,84 @@
+openapi: '3.0.0'
+info:
+  title: Message bridge API
+  description: API documentation
+  version: '1.0'
+
+paths:
+  /message:
+    post:
+      operationId: sendmessage
+      description: 发送消息给订阅者，用户可以通过extra指定接收者及发送渠道
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                Message:
+                  type: object
+                  properties:
+                    content:
+                      type: string
+                      example: Hello world!
+                    title:
+                      type: string
+                      example: Welcome
+                    category:
+                      type: string
+                      example: 告警
+                      description: 消息分类。
+                    sender:
+                      type: string
+                      example: "本机发送"
+                      description: 发送者标识
+                extra:
+                  type: object
+                  properties:
+                    monkeytalk:
+                      type: array
+                      description: monkeytalk的发送id
+                      items:
+                        type: string
+                      example: ["9871", "9950"]
+                    bcowechat:
+                      type: array
+                      description: 7位员工号
+                      items:
+                        type: string
+                      example: ["1234567", "9999999"]
+                    email:
+                      type: array
+                      description: 暂未开通
+                      items:
+                        type: string
+                        format: email
+                      example: ["abc@outlook.com"]
+      responses:
+        200:
+          description: 消息发送正常返回。需要注意的是如果code是warning则表明存在无订阅者或部分用户发送失败。发送方自行处理。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Message 6fe4fd9a-4eae-4248-bd6b-d4f1aac75e08 has been sent.
+                  code:
+                    type: string
+                    example: 'ok'
+        400:
+          description: 非法请求
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: No data provided.
+                  code:
+                    type: string
+                    example: 'Bad Request'
